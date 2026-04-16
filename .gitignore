@@ -1,0 +1,8 @@
+# Ignore BSP zips (large binaries) — download via --target or --fetch-latest
+bsp/*.zip
+
+# Runtime
+__pycache__/
+*.pyc
+upgrades/
+.env
