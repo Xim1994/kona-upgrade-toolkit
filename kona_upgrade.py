@@ -986,20 +986,23 @@ def phase5_opkg_refresh(gw, allow_downgrade=False, force=False):
                            "Check if BSP zip was fully extracted.")
 
     log.info("  Running opkg update...")
-    rc, out, err = gw.run("opkg update 2>&1", timeout=120)
-    full_output = out + (err or "")
-    for line in out.splitlines():
-        log.info(f"    {line}")
+    # Don't rely on shell `2>&1` — BusyBox ash + paramiko can lose the merge.
+    # Capture stdout and stderr separately and combine in Python.
+    rc, out, err = gw.run("opkg update", timeout=120)
+    full_output = out + "\n" + (err or "")
+    for line in full_output.splitlines():
+        if line.strip():
+            log.info(f"    {line}")
 
     bsp_confirmed = "Updated source 'bsp'" in full_output
     if not bsp_confirmed:
-        # Retry once — filesystem may need a moment after unzip+sync
         log.warning("  bsp source not confirmed on first attempt, retrying in 5s...")
         time.sleep(5)
-        rc, out, err = gw.run("opkg update 2>&1", timeout=120)
-        full_output = out + (err or "")
-        for line in out.splitlines():
-            log.info(f"    {line}")
+        rc, out, err = gw.run("opkg update", timeout=120)
+        full_output = out + "\n" + (err or "")
+        for line in full_output.splitlines():
+            if line.strip():
+                log.info(f"    {line}")
         bsp_confirmed = "Updated source 'bsp'" in full_output
 
     if not bsp_confirmed:
