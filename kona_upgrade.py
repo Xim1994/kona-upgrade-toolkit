@@ -1012,12 +1012,14 @@ def phase5_opkg_refresh(gw, allow_downgrade=False):
         # opkg 0.4.0 quirks with paramiko exec_command don't simulate a real
         # interactive TTY well enough. Use invoke_shell which opens a real
         # interactive SSH shell session — the same thing you get from `ssh root@...`.
-        shell = gw.client.invoke_shell()
+        shell = gw.client.invoke_shell(term="xterm", width=120, height=40)
         shell.settimeout(240)
-        # Discard motd/banner
-        time.sleep(2)
+        # Wait for shell prompt to settle, discard motd/banner
+        time.sleep(4)
+        banner = b""
         while shell.recv_ready():
-            shell.recv(65536)
+            banner += shell.recv(65536)
+        log.debug(f"  invoke_shell banner: {len(banner)} bytes")
         # Send the command with a sentinel we can detect when it completes
         shell.send("opkg update; echo __OPKG_DONE_$?\n")
         buf = b""
@@ -1029,15 +1031,25 @@ def phase5_opkg_refresh(gw, allow_downgrade=False):
                     break
                 buf += chunk
                 if b"__OPKG_DONE_" in buf:
+                    # read any trailing bytes
+                    time.sleep(0.5)
+                    while shell.recv_ready():
+                        buf += shell.recv(65536)
                     break
             else:
                 time.sleep(0.3)
         shell.close()
         full_output = buf.decode(errors="replace")
-        for line in full_output.splitlines():
+        # Strip ANSI escape codes and shell prompts
+        import re as _re
+        clean = _re.sub(r'\x1b\[[0-9;]*[a-zA-Z]', '', full_output)
+        clean = _re.sub(r'\r\n?', '\n', clean)
+        log.info(f"  invoke_shell captured {len(buf)} bytes:")
+        for line in clean.splitlines():
             stripped = line.strip()
-            if stripped and "__OPKG_DONE_" not in stripped and not stripped.startswith("opkg update"):
+            if stripped and "__OPKG_DONE_" not in stripped and "opkg update;" not in stripped:
                 log.info(f"    {stripped}")
+        full_output = clean
         # Verify the real effect: /var/lib/opkg/lists/bsp is populated
         _, lists_info, _ = gw.run("ls -la /var/lib/opkg/lists/ 2>&1")
         log.info(f"  /var/lib/opkg/lists/ contents:")
