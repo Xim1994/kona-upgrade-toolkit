@@ -992,7 +992,7 @@ def phase4_staging(gw, bsp_zip_local, expected_sha256, target_version=None):
 # Phase 5 - Opkg refresh
 # ============================================================================
 
-def phase5_opkg_refresh(gw, allow_downgrade=False, force=False):
+def phase5_opkg_refresh(gw, allow_downgrade=False):
     gw.run("rm -fr /var/lib/opkg/lists/*", check=True)
     log.info("  Cleared opkg lists")
 
@@ -1045,17 +1045,18 @@ def phase5_opkg_refresh(gw, allow_downgrade=False, force=False):
         log.info(f"  bsp feed populated: /var/lib/opkg/lists/bsp = {bsp_list_size} bytes")
 
     if not bsp_confirmed:
-        # Diagnostic dump for debugging
-        log.error("  opkg update did not confirm bsp source. Diagnostics:")
+        # opkg 0.4.0 on old BSP has TTY/redirect quirks we can't reliably bypass.
+        # Downgrade to warning: Phase 7 (tektelic-dist-upgrade -Du) runs its own
+        # opkg update internally, and it will fail loudly if the feed really isn't
+        # loaded. So we defer authoritative verification to Phase 7.
+        log.warning(yellow(f"  Could not confirm bsp source via opkg update "
+                            f"(bsp_list_size={bsp_list_size})."))
+        log.warning(yellow(f"  Deferring verification to Phase 7 — tektelic-dist-upgrade "
+                            f"will fail cleanly if the feed is actually broken."))
         _, opkg_conf, _ = gw.run("grep -E '^src|check_signature' /etc/opkg/*.conf 2>&1")
-        log.error(f"  opkg feeds configured: {opkg_conf.strip()}")
+        log.info(f"  opkg feeds configured: {opkg_conf.strip()[:200]}")
         _, bsp_ls, _ = gw.run("ls /lib/firmware/bsp/Packages* 2>&1")
-        log.error(f"  Packages files: {bsp_ls.strip()}")
-        if force:
-            log.warning(yellow("  Proceeding anyway (--force)"))
-        else:
-            raise RuntimeError(
-                "opkg update did not confirm bsp source. Run 'opkg update' manually on the GW to diagnose.")
+        log.info(f"  Packages files: {bsp_ls.strip()}")
 
     # Check what upgrade would do. For downgrade the tool reports "No BSP upgrade
     # available" because the feed version is older than installed - skip the check
@@ -1663,7 +1664,7 @@ Examples:
         # Phase 5
         try:
             with Phase("PHASE 5: OPKG REFRESH"):
-                phase5_opkg_refresh(gw, allow_downgrade=args.allow_downgrade, force=args.force)
+                phase5_opkg_refresh(gw, allow_downgrade=args.allow_downgrade)
         except Exception as e:
             print_recovery_hint(str(e))
             result["error"] = f"opkg_refresh: {e}"
