@@ -1100,9 +1100,15 @@ def phase8_monitor(host, user, password, timeout_min=40):
                 last_progress = prog_n
 
             # Flip has_been_working once the upgrader shows signs of activity.
-            # This is the canonical success precondition for the check below.
             if prog_n > 0 or "in-progress" in status:
                 has_been_working = True
+
+            # progress=100% = all packages installed. The GW will do a final reboot
+            # after this. No need to wait for status=ok — declare success now.
+            if prog_n == 100:
+                log.info(f"  progress=100% — upgrade complete. GW will reboot shortly.")
+                gw.close()
+                return True, None
 
             # Scan recent log lines for error signatures
             for sig in ERROR_SIGNATURES:
@@ -1119,8 +1125,6 @@ def phase8_monitor(host, user, password, timeout_min=40):
                 return False, saw_error
 
             # Success: progress back to 0 and status=ok, after having been working.
-            # (Previously this used `last_progress > 0` which failed because
-            # last_progress was updated to 0 in this same iteration.)
             if prog_n == 0 and status.strip() == "ok" and has_been_working:
                 log.info("  Progress back to 0, status=ok - upgrade complete")
                 gw.close()
@@ -1617,7 +1621,10 @@ Examples:
                 return _finish(result, 5, args.json, t_start)
 
         # Phase 9 — runs even after Phase 8 timeout (version check will catch real failures)
-        gw.connect()
+        # GW may still be rebooting after the final 100% reboot — be patient
+        log.info("  Waiting for GW to come back online for post-verify...")
+        time.sleep(30)  # give GW time to finish reboot
+        gw.connect(retries=10, backoff=15)
         with Phase("PHASE 9: POST-VERIFY"):
             if not phase9_postverify(gw, args.target, baselines_pre=baselines_pre):
                 log.error(red("Post-verify FAILED"))
