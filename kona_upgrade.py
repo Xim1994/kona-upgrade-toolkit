@@ -148,11 +148,13 @@ def check_abort():
 RECOVERY_HINTS = {
     "UBI device does not have free": (
         "The backup UBI volume is full. Run manually on the GW:\n"
-        "    rm -rf /backup/000/* && sync\n"
-        "Then re-run this script. /backup/000/ is only a previous-BSP rollback snapshot, "
-        "safe to delete. The upgrader will create a fresh one before installing."),
+        "    rm -rf /backup/[0-9][0-9][0-9]/* && sync\n"
+        "This clears ALL backup slots (000, 001, 002...). They are rootfs snapshots "
+        "from previous upgrades, safe to delete. The upgrader will create a fresh one."),
     "ubimkvol: error": (
-        "Same as above: /backup/000/ full. Run `rm -rf /backup/000/* && sync` on GW and re-run."),
+        "Same as above: UBI backup partition full. Run:\n"
+        "    rm -rf /backup/[0-9][0-9][0-9]/* && sync\n"
+        "This clears all backup slots. Then re-run the script."),
     "preinst script returned status 1": (
         "A package postinst failed, typically tektelic-add-users because user 'admin' exists.\n"
         "On the GW: `userdel admin && rm -rf /home/admin` then re-run the upgrade."),
@@ -748,22 +750,31 @@ def phase1_preflight(gw, target_version, expected_min_free_mb=140, allow_downgra
 def phase2_risk(gw):
     risks = {}
 
-    # /backup/000/ size (THE UBI blocker from the reported production failure)
-    _, bkp_size, _ = gw.run("du -sm /backup/000 2>/dev/null | awk '{print $1}'")
+    # Total /backup/ usage across ALL slots (000, 001, 002, 003...).
+    # The UBI partition ubi1:backup is ~248MB. If total usage > 100MB, the upgrade
+    # tool can't create its new pre-install snapshot and aborts with "ubimkvol: error".
+    _, bkp_total, _ = gw.run("du -sm /backup 2>/dev/null | awk '{print $1}'")
+    _, bkp_slots, _ = gw.run("ls -d /backup/[0-9][0-9][0-9] 2>/dev/null")
     try:
-        size_mb = int(bkp_size.strip() or "0")
+        total_mb = int(bkp_total.strip() or "0")
     except ValueError:
-        size_mb = 0
-    risks["backup_mb"] = size_mb
-    if size_mb > 100:
-        log.warning(f"  [RISK] /backup/000/ = {size_mb}MB - WILL BLOCK upgrade via 'ubimkvol: no free logical eraseblocks'")
-        log.warning(f"         Auto-cleanup needed (see phase 3) - snapshot content: rootfs of a previous version")
+        total_mb = 0
+    slots = [s.strip() for s in bkp_slots.splitlines() if s.strip()]
+    risks["backup_mb"] = total_mb
+    risks["backup_slots"] = slots
+    if total_mb > 100:
+        log.warning(f"  [RISK] /backup/ = {total_mb}MB across {len(slots)} slot(s) - "
+                     "WILL BLOCK upgrade via 'ubimkvol: no free logical eraseblocks'")
+        for slot in slots:
+            _, slot_sz, _ = gw.run(f"du -sm {slot} 2>/dev/null | awk '{{print $1}}'")
+            log.warning(f"         {slot} = {slot_sz.strip()}MB")
+        log.warning(f"         Auto-cleanup: delete old slots (1+), empty slot 0 for new backup")
         risks["needs_backup_cleanup"] = True
-    elif size_mb > 0:
-        log.info(f"  [INFO] /backup/000/ = {size_mb}MB - acceptable, no cleanup needed")
+    elif total_mb > 0:
+        log.info(f"  [INFO] /backup/ = {total_mb}MB across {len(slots)} slot(s) - acceptable")
         risks["needs_backup_cleanup"] = False
     else:
-        log.info(f"  [OK]   /backup/000/ empty or absent")
+        log.info(f"  [OK]   /backup/ empty or absent")
         risks["needs_backup_cleanup"] = False
 
     # user admin (the useradd-exists blocker from the reported production failure)
@@ -810,6 +821,12 @@ def phase3_cleanup(gw, risks, confirmed):
     actions = []
 
     if risks.get("needs_backup_cleanup"):
+        # Delete ALL old backup slots (001, 002, 003...) entirely
+        old_slots = [s for s in risks.get("backup_slots", []) if not s.endswith("/000")]
+        for slot in old_slots:
+            actions.append((f"Delete old backup slot {slot}",
+                            f"rm -rf {slot} && sync"))
+        # Empty slot 000 contents (tektelic-dist-upgrade will create fresh backup here)
         actions.append(("Empty /backup/000/*",
                         "rm -rf /backup/000/* && sync"))
     if risks.get("admin_user_exists"):
