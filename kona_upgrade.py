@@ -73,7 +73,7 @@ def bold(s):   return _c("1",  s)
 # Configuration & logging
 # ============================================================================
 
-REPO_ROOT = Path(__file__).resolve().parents[3]
+SCRIPT_DIR = Path(__file__).resolve().parent
 
 
 def load_env(env_path):
@@ -86,7 +86,11 @@ def load_env(env_path):
             os.environ.setdefault(k.strip(), v.strip())
 
 
-load_env(REPO_ROOT / ".env")
+# Search for .env: next to the script first, then cwd, then 3 levels up (dev workspace)
+for _candidate in [SCRIPT_DIR / ".env", Path.cwd() / ".env", SCRIPT_DIR.parents[2] / ".env"]:
+    if _candidate.exists():
+        load_env(_candidate)
+        break
 
 
 def setup_logging(gw_name, target):
@@ -454,10 +458,9 @@ def ns_resolve_gw_ip(gw_name):
     user = os.environ.get("TEKTELIC_NS_USER")
     pw   = os.environ.get("TEKTELIC_NS_PASS")
     cid  = os.environ.get("TEKTELIC_CUSTOMER_ID")
-    if not user or not pw or not cid:
+    if not user or not pw:
         raise RuntimeError(
-            "NS resolve needs TEKTELIC_NS_USER + TEKTELIC_NS_PASS + "
-            "TEKTELIC_CUSTOMER_ID in .env")
+            "NS resolve needs TEKTELIC_NS_USER + TEKTELIC_NS_PASS in .env")
     ctx = ssl.create_default_context()
 
     # 1) Login
@@ -471,6 +474,20 @@ def ns_resolve_gw_ip(gw_name):
         tok = json.loads(r.read())["token"]
 
     H = {"X-Authorization": "Bearer " + tok}
+
+    # Auto-discover customer_id from user profile if not in .env
+    if not cid:
+        req = urllib.request.Request(
+            f"{TEKTELIC_NS_URL}/api/auth/user",
+            headers=H)
+        with urllib.request.urlopen(req, timeout=15, context=ctx) as r:
+            profile = json.loads(r.read())
+        cid = profile.get("customerId", {}).get("id")
+        if not cid:
+            raise RuntimeError(
+                "Could not auto-discover customer_id from NS user profile. "
+                "Set TEKTELIC_CUSTOMER_ID in .env manually.")
+        log.debug(f"  Auto-discovered customer_id: {cid}")
 
     # 2) Find gateway by name
     req = urllib.request.Request(
