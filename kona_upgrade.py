@@ -908,9 +908,24 @@ def phase3_cleanup(gw, risks, confirmed):
 # Phase 4 - Staging
 # ============================================================================
 
-def phase4_staging(gw, bsp_zip_local, expected_sha256):
+def phase4_staging(gw, bsp_zip_local, expected_sha256, target_version=None):
     if not Path(bsp_zip_local).exists():
         raise FileNotFoundError(f"BSP zip not found: {bsp_zip_local}")
+
+    # Shortcut: if target BSP already staged on GW, skip SFTP entirely.
+    # Detection: look for tektelic-bsp-version_<target>-*.ipk in /lib/firmware/bsp/
+    if target_version:
+        _, staged, _ = gw.run(
+            f"ls /lib/firmware/bsp/tektelic-bsp-version_{target_version}*.ipk 2>/dev/null")
+        if staged.strip():
+            log.info(f"  {green('[skip SFTP]')} target BSP {target_version} already staged on GW:")
+            log.info(f"    {staged.strip()}")
+            _, pkg_check, _ = gw.run("test -f /lib/firmware/bsp/Packages.gz && echo ok")
+            if pkg_check.strip() == "ok":
+                log.info("  Packages.gz present — reusing staged BSP, no upload needed")
+                return
+            else:
+                log.warning("  Packages.gz missing despite BSP marker — forcing re-upload")
 
     # Verify local SHA256 first
     log.info(f"  Local zip: {bsp_zip_local}")
@@ -1615,7 +1630,7 @@ Examples:
         # Phase 4
         try:
             with Phase("PHASE 4: STAGING"):
-                phase4_staging(gw, args.bsp, args.sha256)
+                phase4_staging(gw, args.bsp, args.sha256, target_version=args.target)
         except Exception as e:
             print_recovery_hint(str(e))
             result["error"] = f"staging: {e}"
