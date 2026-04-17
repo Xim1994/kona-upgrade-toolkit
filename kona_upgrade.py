@@ -1009,19 +1009,13 @@ def phase5_opkg_refresh(gw, allow_downgrade=False, force=False):
     # After a successful opkg update, /var/lib/opkg/lists/bsp exists and has size > 0.
 
     def _run_and_verify():
-        # Allocate PTY + explicit env (PATH, HOME, TERM) because paramiko's
-        # non-login shell may lack what opkg 0.4.0 needs. Some opkg versions
-        # silently fail without these.
-        opkg_cmd = (
-            "export PATH=/usr/sbin:/usr/bin:/sbin:/bin HOME=/root TERM=xterm && "
-            "rm -f /tmp/opkg_update.log && "
-            "opkg update > /tmp/opkg_update.log 2>&1; "
-            "echo OPKG_RC=$?"
-        )
-        _, rc_out, _ = gw.run(opkg_cmd, timeout=120, get_pty=True)
-        log.info(f"  opkg launched: {rc_out.strip()[-40:]}")
-        _, contents, _ = gw.run("cat /tmp/opkg_update.log 2>/dev/null")
-        for line in contents.splitlines():
+        # IMPORTANT: do NOT redirect `opkg update` to a file. opkg 0.4.0 (on BSP 4.x)
+        # detects stdout is not a TTY when redirected and silently no-ops (exit 0
+        # but does nothing — no output, no list updates). Validated 2026-04-17.
+        # Run directly via paramiko PTY and capture output from there.
+        rc, out, err = gw.run("opkg update", timeout=120, get_pty=True)
+        full_output = out + "\n" + (err or "")
+        for line in full_output.splitlines():
             if line.strip():
                 log.info(f"    {line}")
         # Verify the real effect: /var/lib/opkg/lists/bsp is populated
@@ -1034,7 +1028,7 @@ def phase5_opkg_refresh(gw, allow_downgrade=False, force=False):
             size = int(bsp_size.strip() or "0")
         except ValueError:
             size = 0
-        return size, contents
+        return size, full_output
 
     bsp_list_size, full_output = _run_and_verify()
     # Success = /var/lib/opkg/lists/bsp exists with content
