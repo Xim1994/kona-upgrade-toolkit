@@ -245,9 +245,11 @@ class GW:
         if not quiet:
             log.debug(f"$ {cmd}")
         stdin, stdout, stderr = self.client.exec_command(cmd, timeout=timeout)
-        rc = stdout.channel.recv_exit_status()
+        # Read output BEFORE exit status — paramiko can deadlock or lose output
+        # if recv_exit_status() is called first and the command produces a lot of output
         out = stdout.read().decode(errors="replace").strip()
         err = stderr.read().decode(errors="replace").strip()
+        rc = stdout.channel.recv_exit_status()
         if out and not quiet: log.debug(f"  stdout: {out[:500]}")
         if err and not quiet: log.debug(f"  stderr: {err[:500]}")
         if check and rc != 0:
