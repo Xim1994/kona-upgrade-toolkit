@@ -1013,11 +1013,13 @@ def phase6_gate(current, target, bsp_size, free_mb, yes):
 # Phase 7 - Upgrade
 # ============================================================================
 
-def phase7_upgrade(gw, allow_downgrade=False):
-    # -D = daemon, -u = upgrade immediately, -f = force (required for downgrade since
-    # -u alone treats older feed versions as "nothing to do").
-    cmd = "tektelic-dist-upgrade -Duf 2>&1" if allow_downgrade else "tektelic-dist-upgrade -Du 2>&1"
-    log.info(f"  Launching {cmd.split(' 2>&1')[0]} (daemon mode, survives SSH disconnect)")
+def phase7_upgrade(gw):
+    # Always use -f (force): without it, the tool skips the upgrade if its last
+    # recorded status is "ok" (e.g. after a successful auto-rollback from a previous
+    # failed attempt). -f resets that state and forces a fresh upgrade.
+    # -D = daemon (survives SSH disconnect), -u = upgrade, -f = force.
+    cmd = "tektelic-dist-upgrade -Duf 2>&1"
+    log.info(f"  Launching tektelic-dist-upgrade -Duf (daemon + force)")
     rc, out, err = gw.run(cmd, timeout=60)
     log.info(f"  Initial response: {out[:400]}")
     # Daemon mode returns quickly; upgrade continues in background
@@ -1575,7 +1577,7 @@ Examples:
 
         # Phase 7
         with Phase("PHASE 7: UPGRADE"):
-            phase7_upgrade(gw, allow_downgrade=args.allow_downgrade)
+            phase7_upgrade(gw)
         gw.close()  # daemon mode — we'll reconnect in monitor
 
         # Phase 8
