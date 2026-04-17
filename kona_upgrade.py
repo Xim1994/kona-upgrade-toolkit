@@ -238,13 +238,16 @@ class GW:
             except Exception: pass
             self.client = None
 
-    def run(self, cmd, timeout=30, check=False, quiet=False):
+    def run(self, cmd, timeout=30, check=False, quiet=False, get_pty=False):
         """Run a shell command. Returns (rc, stdout, stderr).
-        If check=True, raises on non-zero rc with the command + stderr."""
+        If check=True, raises on non-zero rc with the command + stderr.
+        If get_pty=True, allocates a pseudo-terminal — needed for some tools
+        (old opkg, tektelic-dist-upgrade interactive mode) that check isatty()
+        and refuse to run or produce no output in non-interactive mode."""
         check_abort()
         if not quiet:
             log.debug(f"$ {cmd}")
-        stdin, stdout, stderr = self.client.exec_command(cmd, timeout=timeout)
+        stdin, stdout, stderr = self.client.exec_command(cmd, timeout=timeout, get_pty=get_pty)
         # Read output BEFORE exit status — paramiko can deadlock or lose output
         # if recv_exit_status() is called first and the command produces a lot of output
         out = stdout.read().decode(errors="replace").strip()
@@ -1006,8 +1009,10 @@ def phase5_opkg_refresh(gw, allow_downgrade=False, force=False):
     # After a successful opkg update, /var/lib/opkg/lists/bsp exists and has size > 0.
 
     def _run_and_verify():
-        gw.run("opkg update > /tmp/opkg_update.log 2>&1", timeout=120)
-        # Show whatever output we got (may be empty on old opkg)
+        # Allocate PTY — old opkg (0.4.0) checks isatty() and refuses to do
+        # anything (no output AND no action) without a terminal.
+        gw.run("opkg update > /tmp/opkg_update.log 2>&1", timeout=120, get_pty=True)
+        # Show whatever output we got
         _, contents, _ = gw.run("cat /tmp/opkg_update.log 2>/dev/null")
         for line in contents.splitlines():
             if line.strip():
