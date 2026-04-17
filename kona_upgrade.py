@@ -948,9 +948,9 @@ def phase4_staging(gw, bsp_zip_local, expected_sha256):
     if int(remote_size.strip()) != size:
         raise RuntimeError(f"remote size mismatch: {remote_size} vs {size}")
 
-    # Unzip
+    # Unzip + sync (sync ensures filesystem is flushed before opkg reads it)
     log.info("  Unzipping on GW...")
-    rc, out, err = gw.run(f"cd /lib/firmware && unzip -o bsp.zip && rm -f bsp.zip", timeout=120, check=True)
+    rc, out, err = gw.run(f"cd /lib/firmware && unzip -o bsp.zip && rm -f bsp.zip && sync", timeout=120, check=True)
     log.debug(out[:500])
 
     # Verify extracted structure
@@ -972,18 +972,46 @@ def phase4_staging(gw, bsp_zip_local, expected_sha256):
 # Phase 5 - Opkg refresh
 # ============================================================================
 
-def phase5_opkg_refresh(gw, allow_downgrade=False):
+def phase5_opkg_refresh(gw, allow_downgrade=False, force=False):
     gw.run("rm -fr /var/lib/opkg/lists/*", check=True)
     log.info("  Cleared opkg lists")
 
-    log.info("  Running opkg update (will verify GPG signatures)...")
-    rc, out, err = gw.run("opkg update 2>&1", timeout=60)
+    # Verify feed directories exist before calling opkg update
+    _, feeds, _ = gw.run("ls -d /lib/firmware/bsp /lib/firmware/fe-fpga /lib/firmware/gpio-fpga 2>&1")
+    log.info(f"  Feed dirs present: {feeds.strip()}")
+    if "/lib/firmware/bsp" not in feeds:
+        raise RuntimeError("/lib/firmware/bsp/ missing — Phase 4 staging may have failed. "
+                           "Check if BSP zip was fully extracted.")
+
+    log.info("  Running opkg update...")
+    rc, out, err = gw.run("opkg update 2>&1", timeout=120)
+    full_output = out + (err or "")
     for line in out.splitlines():
         log.info(f"    {line}")
-    if "Updated source 'bsp'" not in out:
-        raise RuntimeError("opkg update did not confirm bsp source - GPG verify may have failed")
-    if rc != 0:
-        raise RuntimeError(f"opkg update rc={rc}")
+
+    bsp_confirmed = "Updated source 'bsp'" in full_output
+    if not bsp_confirmed:
+        # Retry once — filesystem may need a moment after unzip+sync
+        log.warning("  bsp source not confirmed on first attempt, retrying in 5s...")
+        time.sleep(5)
+        rc, out, err = gw.run("opkg update 2>&1", timeout=120)
+        full_output = out + (err or "")
+        for line in out.splitlines():
+            log.info(f"    {line}")
+        bsp_confirmed = "Updated source 'bsp'" in full_output
+
+    if not bsp_confirmed:
+        # Diagnostic dump for debugging
+        log.error("  opkg update did not confirm bsp source. Diagnostics:")
+        _, opkg_conf, _ = gw.run("grep -E '^src|check_signature' /etc/opkg/*.conf 2>&1")
+        log.error(f"  opkg feeds configured: {opkg_conf.strip()}")
+        _, bsp_ls, _ = gw.run("ls /lib/firmware/bsp/Packages* 2>&1")
+        log.error(f"  Packages files: {bsp_ls.strip()}")
+        if force:
+            log.warning(yellow("  Proceeding anyway (--force)"))
+        else:
+            raise RuntimeError(
+                "opkg update did not confirm bsp source. Run 'opkg update' manually on the GW to diagnose.")
 
     # Check what upgrade would do. For downgrade the tool reports "No BSP upgrade
     # available" because the feed version is older than installed - skip the check
@@ -1591,7 +1619,7 @@ Examples:
         # Phase 5
         try:
             with Phase("PHASE 5: OPKG REFRESH"):
-                phase5_opkg_refresh(gw, allow_downgrade=args.allow_downgrade)
+                phase5_opkg_refresh(gw, allow_downgrade=args.allow_downgrade, force=args.force)
         except Exception as e:
             print_recovery_hint(str(e))
             result["error"] = f"opkg_refresh: {e}"
