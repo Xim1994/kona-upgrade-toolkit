@@ -672,13 +672,17 @@ def phase1_preflight(gw, target_version, expected_min_free_mb=140, allow_downgra
           path_ok, path_msg)
 
     _, up_status, _ = gw.run("tektelic-dist-upgrade -s 2>&1")
-    check("tektelic-dist-upgrade status", up_status.strip() == "ok", f"'{up_status}'")
+    # "ok" = last upgrade succeeded, "n/a" = never upgraded before (both are fine)
+    status_ok = up_status.strip() in ("ok", "n/a")
+    check("tektelic-dist-upgrade status", status_ok, f"'{up_status.strip()}'")
 
     _, up_prog, _ = gw.run("tektelic-dist-upgrade -p 2>&1")
     check("no upgrade in progress", up_prog.strip() == "0", f"progress={up_prog}")
 
+    # -t flag may not exist on older BSPs (4.x) — treat "illegal option" as OK
     _, up_sched, _ = gw.run("tektelic-dist-upgrade -t 2>&1")
-    check("no scheduled upgrade", "0" in up_sched, up_sched)
+    sched_ok = "0" in up_sched or "illegal option" in up_sched
+    check("no scheduled upgrade", sched_ok, up_sched.strip()[:80])
 
     _, ro_mounts, _ = gw.run("mount | grep -E 'ro[,)]' || true")
     check("no read-only mounts", not ro_mounts.strip(), ro_mounts or "(clean)")
