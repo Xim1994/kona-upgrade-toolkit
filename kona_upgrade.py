@@ -1078,20 +1078,24 @@ def phase5_opkg_refresh(gw, allow_downgrade=False):
         _, bsp_ls, _ = gw.run("ls /lib/firmware/bsp/Packages* 2>&1")
         log.info(f"  Packages files: {bsp_ls.strip()}")
 
-    # Check what upgrade would do. For downgrade the tool reports "No BSP upgrade
-    # available" because the feed version is older than installed - skip the check
-    # and let Phase 7 drive the actual package install.
-    log.info("  Running tektelic-dist-upgrade -c ...")
-    rc, out, err = gw.run("tektelic-dist-upgrade -c 2>&1", timeout=60)
-    if "No BSP upgrade available" in out:
-        if allow_downgrade:
-            log.info("  Feed version is older than installed (expected for downgrade) - proceeding")
+    # Only run `tektelic-dist-upgrade -c` if opkg update visibly succeeded.
+    # If bsp wasn't confirmed (old opkg TTY quirks), skip this check — Phase 7
+    # will fail loudly with the real error if the feed is actually broken.
+    if bsp_confirmed:
+        log.info("  Running tektelic-dist-upgrade -c ...")
+        rc, out, err = gw.run("tektelic-dist-upgrade -c 2>&1", timeout=60)
+        if "No BSP upgrade available" in out:
+            if allow_downgrade:
+                log.info("  Feed version is older than installed (expected for downgrade) - proceeding")
+            else:
+                raise RuntimeError("tektelic-dist-upgrade -c sees no upgrade - feed not loaded correctly")
         else:
-            raise RuntimeError("tektelic-dist-upgrade -c sees no upgrade - feed not loaded correctly")
+            for line in out.splitlines()[:30]:
+                log.info(f"    {line}")
+            log.info(f"    ... ({len(out.splitlines())} lines total)")
     else:
-        for line in out.splitlines()[:30]:
-            log.info(f"    {line}")
-        log.info(f"    ... ({len(out.splitlines())} lines total)")
+        log.warning(yellow("  Skipping tektelic-dist-upgrade -c check (opkg confirmation failed)"))
+        log.warning(yellow("  Phase 7 will run tektelic-dist-upgrade -Duf — it will surface real errors"))
 
 
 # ============================================================================
