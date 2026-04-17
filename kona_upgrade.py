@@ -1001,11 +1001,27 @@ def phase5_opkg_refresh(gw, allow_downgrade=False, force=False):
                            "Check if BSP zip was fully extracted.")
 
     log.info("  Running opkg update...")
-    # Redirect output to a file on the GW and read it. This bypasses any
-    # paramiko stdout/stderr capture issues (BusyBox opkg behaves differently
-    # without a PTY — sometimes produces no captured output at all).
-    gw.run("opkg update > /tmp/opkg_update.log 2>&1", timeout=120)
-    rc, full_output, _ = gw.run("cat /tmp/opkg_update.log")
+    # Redirect output to a file on the GW and read it. The shell handles the
+    # redirection, so paramiko PTY/buffer quirks are bypassed entirely.
+
+    def _run_opkg_update():
+        # Remove stale log, run opkg, report file size, then read contents
+        gw.run("rm -f /tmp/opkg_update.log", check=False)
+        opkg_rc, _, _ = gw.run("opkg update > /tmp/opkg_update.log 2>&1; echo OPKG_RC=$?", timeout=120)
+        _, size_out, _ = gw.run("wc -c < /tmp/opkg_update.log")
+        try:
+            size = int(size_out.strip() or "0")
+        except ValueError:
+            size = 0
+        _, contents, _ = gw.run("cat /tmp/opkg_update.log")
+        log.info(f"  opkg update wrote {size} bytes to /tmp/opkg_update.log")
+        if size == 0:
+            log.error("  /tmp/opkg_update.log is EMPTY - opkg produced no output at all")
+            _, opkg_which, _ = gw.run("which opkg; opkg --version 2>&1 || true")
+            log.error(f"  opkg binary: {opkg_which.strip()}")
+        return contents
+
+    full_output = _run_opkg_update()
     for line in full_output.splitlines():
         if line.strip():
             log.info(f"    {line}")
@@ -1014,8 +1030,7 @@ def phase5_opkg_refresh(gw, allow_downgrade=False, force=False):
     if not bsp_confirmed:
         log.warning("  bsp source not confirmed on first attempt, retrying in 5s...")
         time.sleep(5)
-        gw.run("opkg update > /tmp/opkg_update.log 2>&1", timeout=120)
-        rc, full_output, _ = gw.run("cat /tmp/opkg_update.log")
+        full_output = _run_opkg_update()
         for line in full_output.splitlines():
             if line.strip():
                 log.info(f"    {line}")
