@@ -108,6 +108,9 @@ def setup_logging(gw_name, target):
     fh = logging.FileHandler(log_file, encoding="utf-8")
     fh.setFormatter(fmt); fh.setLevel(logging.DEBUG)
     root.addHandler(ch); root.addHandler(fh)
+    # Suppress paramiko's verbose banner/transport logs (floods terminal during Phase 8 monitor)
+    logging.getLogger("paramiko").setLevel(logging.WARNING)
+    logging.getLogger("paramiko.transport").setLevel(logging.WARNING)
     return log_file
 
 
