@@ -821,14 +821,18 @@ def phase3_cleanup(gw, risks, confirmed):
     actions = []
 
     if risks.get("needs_backup_cleanup"):
-        # Delete ALL old backup slots (001, 002, 003...) entirely
+        # Delete old backup slots (001, 002, 003...) — these are older snapshots
         old_slots = [s for s in risks.get("backup_slots", []) if not s.endswith("/000")]
         for slot in old_slots:
             actions.append((f"Delete old backup slot {slot}",
                             f"rm -rf {slot} && sync"))
-        # Empty slot 000 contents (tektelic-dist-upgrade will create fresh backup here)
-        actions.append(("Empty /backup/000/*",
-                        "rm -rf /backup/000/* && sync"))
+        # Only empty slot 000 if old slots alone didn't free enough space.
+        # Slot 000 = most recent backup = rollback capability. Keep if possible.
+        if not old_slots:
+            log.warning("  No old slots (001+) to delete. Slot 000 is the only backup.")
+            log.warning("  Emptying slot 000 to make room — rollback to previous version will NOT be possible.")
+            actions.append(("Empty /backup/000/* (no old slots available, last resort)",
+                            "rm -rf /backup/000/* && sync"))
     if risks.get("admin_user_exists"):
         actions.append(("Delete user admin",
                         "userdel admin 2>&1 || true"))
@@ -1578,12 +1582,19 @@ Examples:
         with Phase("PHASE 8: MONITOR"):
             ok, err = phase8_monitor(args.host, args.user, args.password)
         if not ok:
-            log.error(red(f"Upgrade FAILED: {err}"))
-            print_recovery_hint(err)
-            result["error"] = f"monitor: {err}"
-            return _finish(result, 5, args.json, t_start)
+            if "timeout" in str(err).lower():
+                # Timeout doesn't necessarily mean failure — the upgrade may have
+                # completed while the monitor missed the signal. Try Phase 9 anyway:
+                # if the version matches target, the upgrade DID succeed.
+                log.warning(yellow(f"Phase 8 timed out — attempting Phase 9 post-verify anyway"))
+                log.warning(yellow(f"(the upgrade often succeeds even when the monitor misses it)"))
+            else:
+                log.error(red(f"Upgrade FAILED: {err}"))
+                print_recovery_hint(err)
+                result["error"] = f"monitor: {err}"
+                return _finish(result, 5, args.json, t_start)
 
-        # Phase 9
+        # Phase 9 — runs even after Phase 8 timeout (version check will catch real failures)
         gw.connect()
         with Phase("PHASE 9: POST-VERIFY"):
             if not phase9_postverify(gw, args.target, baselines_pre=baselines_pre):
