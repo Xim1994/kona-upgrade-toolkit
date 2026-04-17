@@ -1001,40 +1001,42 @@ def phase5_opkg_refresh(gw, allow_downgrade=False, force=False):
                            "Check if BSP zip was fully extracted.")
 
     log.info("  Running opkg update...")
-    # Redirect output to a file on the GW and read it. The shell handles the
-    # redirection, so paramiko PTY/buffer quirks are bypassed entirely.
+    # Run opkg update. Some opkg versions (0.4.0 on BSP 4.x) produce NO output
+    # when stdout is not a TTY — so we verify the EFFECT instead of the output.
+    # After a successful opkg update, /var/lib/opkg/lists/bsp exists and has size > 0.
 
-    def _run_opkg_update():
-        # Remove stale log, run opkg, report file size, then read contents
-        gw.run("rm -f /tmp/opkg_update.log", check=False)
-        opkg_rc, _, _ = gw.run("opkg update > /tmp/opkg_update.log 2>&1; echo OPKG_RC=$?", timeout=120)
-        _, size_out, _ = gw.run("wc -c < /tmp/opkg_update.log")
-        try:
-            size = int(size_out.strip() or "0")
-        except ValueError:
-            size = 0
-        _, contents, _ = gw.run("cat /tmp/opkg_update.log")
-        log.info(f"  opkg update wrote {size} bytes to /tmp/opkg_update.log")
-        if size == 0:
-            log.error("  /tmp/opkg_update.log is EMPTY - opkg produced no output at all")
-            _, opkg_which, _ = gw.run("which opkg; opkg --version 2>&1 || true")
-            log.error(f"  opkg binary: {opkg_which.strip()}")
-        return contents
-
-    full_output = _run_opkg_update()
-    for line in full_output.splitlines():
-        if line.strip():
-            log.info(f"    {line}")
-
-    bsp_confirmed = "Updated source 'bsp'" in full_output
-    if not bsp_confirmed:
-        log.warning("  bsp source not confirmed on first attempt, retrying in 5s...")
-        time.sleep(5)
-        full_output = _run_opkg_update()
-        for line in full_output.splitlines():
+    def _run_and_verify():
+        gw.run("opkg update > /tmp/opkg_update.log 2>&1", timeout=120)
+        # Show whatever output we got (may be empty on old opkg)
+        _, contents, _ = gw.run("cat /tmp/opkg_update.log 2>/dev/null")
+        for line in contents.splitlines():
             if line.strip():
                 log.info(f"    {line}")
-        bsp_confirmed = "Updated source 'bsp'" in full_output
+        # Verify the real effect: /var/lib/opkg/lists/bsp is populated
+        _, lists_info, _ = gw.run("ls -la /var/lib/opkg/lists/ 2>&1")
+        log.info(f"  /var/lib/opkg/lists/ contents:")
+        for line in lists_info.splitlines()[:15]:
+            log.info(f"    {line}")
+        _, bsp_size, _ = gw.run("wc -c < /var/lib/opkg/lists/bsp 2>/dev/null || echo 0")
+        try:
+            size = int(bsp_size.strip() or "0")
+        except ValueError:
+            size = 0
+        return size, contents
+
+    bsp_list_size, full_output = _run_and_verify()
+    # Success = /var/lib/opkg/lists/bsp exists with content
+    # (either the output says "Updated source 'bsp'" OR the bsp list file is populated)
+    bsp_confirmed = bsp_list_size > 0 or "Updated source 'bsp'" in full_output
+
+    if not bsp_confirmed:
+        log.warning(f"  bsp feed not populated (list size={bsp_list_size}), retrying in 5s...")
+        time.sleep(5)
+        bsp_list_size, full_output = _run_and_verify()
+        bsp_confirmed = bsp_list_size > 0 or "Updated source 'bsp'" in full_output
+
+    if bsp_confirmed:
+        log.info(f"  bsp feed populated: /var/lib/opkg/lists/bsp = {bsp_list_size} bytes")
 
     if not bsp_confirmed:
         # Diagnostic dump for debugging
