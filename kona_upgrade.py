@@ -1009,15 +1009,35 @@ def phase5_opkg_refresh(gw, allow_downgrade=False):
     # After a successful opkg update, /var/lib/opkg/lists/bsp exists and has size > 0.
 
     def _run_and_verify():
-        # IMPORTANT: do NOT redirect `opkg update` to a file. opkg 0.4.0 (on BSP 4.x)
-        # detects stdout is not a TTY when redirected and silently no-ops (exit 0
-        # but does nothing — no output, no list updates). Validated 2026-04-17.
-        # Run directly via paramiko PTY and capture output from there.
-        rc, out, err = gw.run("opkg update", timeout=120, get_pty=True)
-        full_output = out + "\n" + (err or "")
+        # opkg 0.4.0 quirks with paramiko exec_command don't simulate a real
+        # interactive TTY well enough. Use invoke_shell which opens a real
+        # interactive SSH shell session — the same thing you get from `ssh root@...`.
+        shell = gw.client.invoke_shell()
+        shell.settimeout(240)
+        # Discard motd/banner
+        time.sleep(2)
+        while shell.recv_ready():
+            shell.recv(65536)
+        # Send the command with a sentinel we can detect when it completes
+        shell.send("opkg update; echo __OPKG_DONE_$?\n")
+        buf = b""
+        deadline = time.time() + 240
+        while time.time() < deadline:
+            if shell.recv_ready():
+                chunk = shell.recv(65536)
+                if not chunk:
+                    break
+                buf += chunk
+                if b"__OPKG_DONE_" in buf:
+                    break
+            else:
+                time.sleep(0.3)
+        shell.close()
+        full_output = buf.decode(errors="replace")
         for line in full_output.splitlines():
-            if line.strip():
-                log.info(f"    {line}")
+            stripped = line.strip()
+            if stripped and "__OPKG_DONE_" not in stripped and not stripped.startswith("opkg update"):
+                log.info(f"    {stripped}")
         # Verify the real effect: /var/lib/opkg/lists/bsp is populated
         _, lists_info, _ = gw.run("ls -la /var/lib/opkg/lists/ 2>&1")
         log.info(f"  /var/lib/opkg/lists/ contents:")
