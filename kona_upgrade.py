@@ -873,9 +873,29 @@ def phase3_cleanup(gw, risks, confirmed):
             log.info(f"    done")
 
     # Verify post-cleanup
-    _, bkp, _ = gw.run("du -sm /backup/000 2>/dev/null | awk '{print $1}' || echo 0")
+    _, bkp_total, _ = gw.run("du -sm /backup 2>/dev/null | awk '{print $1}' || echo 0")
     rc_admin, _, _ = gw.run("grep -qE '^admin:' /etc/passwd")
-    log.info(f"  post-cleanup: /backup/000={bkp}MB  admin_user_exists={rc_admin == 0}")
+    try:
+        bkp_mb = int(bkp_total.strip() or "0")
+    except ValueError:
+        bkp_mb = 0
+    log.info(f"  post-cleanup: /backup/={bkp_mb}MB  admin_user_exists={rc_admin == 0}")
+
+    # Post-cleanup space gate: if /backup/ still uses >100MB, the upgrade WILL fail
+    # with "ubimkvol: UBI device does not have free logical eraseblocks" because
+    # tektelic-dist-upgrade needs to create a ~150MB pre-install snapshot.
+    if bkp_mb > 100:
+        log.error(red(f"  /backup/ still uses {bkp_mb}MB after cleanup (>100MB threshold)."))
+        log.error(red(f"  The upgrade WILL FAIL: not enough space on ubi1:backup for the pre-install snapshot."))
+        _, slot_details, _ = gw.run("du -sm /backup/[0-9][0-9][0-9] 2>/dev/null")
+        for line in slot_details.splitlines():
+            log.error(f"    {line.strip()}")
+        log.error(red(f"  Slot 000 was preserved for rollback. To proceed, you must free space manually:"))
+        log.error(red(f"    ssh root@{gw.host} 'rm -rf /backup/000/* && sync'"))
+        log.error(red(f"  WARNING: this removes your rollback capability to the current version."))
+        raise RuntimeError(
+            f"Insufficient UBI backup space: {bkp_mb}MB used, need <100MB. "
+            f"Slot 000 preserved for rollback — delete it manually to proceed.")
 
 
 # ============================================================================
