@@ -1009,10 +1009,17 @@ def phase5_opkg_refresh(gw, allow_downgrade=False, force=False):
     # After a successful opkg update, /var/lib/opkg/lists/bsp exists and has size > 0.
 
     def _run_and_verify():
-        # Allocate PTY — old opkg (0.4.0) checks isatty() and refuses to do
-        # anything (no output AND no action) without a terminal.
-        gw.run("opkg update > /tmp/opkg_update.log 2>&1", timeout=120, get_pty=True)
-        # Show whatever output we got
+        # Allocate PTY + explicit env (PATH, HOME, TERM) because paramiko's
+        # non-login shell may lack what opkg 0.4.0 needs. Some opkg versions
+        # silently fail without these.
+        opkg_cmd = (
+            "export PATH=/usr/sbin:/usr/bin:/sbin:/bin HOME=/root TERM=xterm && "
+            "rm -f /tmp/opkg_update.log && "
+            "opkg update > /tmp/opkg_update.log 2>&1; "
+            "echo OPKG_RC=$?"
+        )
+        _, rc_out, _ = gw.run(opkg_cmd, timeout=120, get_pty=True)
+        log.info(f"  opkg launched: {rc_out.strip()[-40:]}")
         _, contents, _ = gw.run("cat /tmp/opkg_update.log 2>/dev/null")
         for line in contents.splitlines():
             if line.strip():
