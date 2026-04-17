@@ -1176,11 +1176,16 @@ ERROR_SIGNATURES = [
 
 def phase8_monitor(host, user, password, timeout_min=40):
     log.info(f"  Monitoring upgrade (timeout {timeout_min} min)")
-    deadline = time.time() + timeout_min * 60
+    t_start = time.time()
+    deadline = t_start + timeout_min * 60
     last_progress = -1
     last_connect_fail = 0
     saw_error = None
     has_been_working = False  # flips True once progress >0 or status==in-progress is seen
+    # Abort early if after 3 min we still see n/a status and 0 progress —
+    # this means tektelic-dist-upgrade -Duf launched but did nothing (usually
+    # because opkg feeds weren't loaded — there's nothing to install).
+    early_abort_deadline = t_start + 180
 
     while time.time() < deadline:
         # Try fresh SSH connection each time (GW may reboot mid-upgrade)
@@ -1215,6 +1220,19 @@ def phase8_monitor(host, user, password, timeout_min=40):
             # Flip has_been_working once the upgrader shows signs of activity.
             if prog_n > 0 or "in-progress" in status:
                 has_been_working = True
+
+            # Early-abort: after 3 min, if status is still n/a and no progress,
+            # tektelic-dist-upgrade didn't actually start — opkg feeds probably
+            # not loaded so the tool has nothing to install.
+            if (time.time() > early_abort_deadline
+                    and not has_been_working
+                    and "n/a" in status
+                    and prog_n == 0):
+                gw.close()
+                return False, (
+                    "tektelic-dist-upgrade launched but did nothing (status=n/a after 3 min). "
+                    "Feed likely not loaded — opkg update did not populate /var/lib/opkg/lists/. "
+                    "SSH to GW and run `opkg update` manually, then retry.")
 
             # progress=100% = all packages installed. The GW will do a final reboot
             # after this. No need to wait for status=ok — declare success now.
