@@ -81,5 +81,26 @@ devices:
     status: "No Telemetry"
     dev_eui: "24E124993D529043"
 
-# Planned additions (not yet in Excel):
-#   - Milesight UC100 868M — Modbus->LoRa bridge, target BCN QA
+  - dispositivo: "Milesight UC100-868M (Xim physical)"
+    entorno: QA + Civitech-Homelab
+    normalizer: No
+    decoder: No  # Milesight official: github.com/Milesight-IoT/IoT-Payload-Decoder/blob/main/es/uc100.js
+    device_type: Si  # Model Milesight-UC100-868M created in BI QA NS 2026-04-19
+    device_created: "ChirpStack (home) + BI QA (SVAN-SHOWCASE-BCN-QA)"
+    connectivity: "Pending join (awaiting ToolBox to flash AppKey)"
+    status: Pending
+    dev_eui: "24E124468E390989"
+    app_eui: "24E124C0002A0001"
+    app_key: "8AB086AB46CFC2958CF0239FDAAABFB4"  # generated 2026-04-19, same in both NSs
+    serial_number: "6468E39098910005"
+    model: "UC100-868M"
+    frequency_band: "EU868"
+    power: "5-24V DC"
+    chirpstack_device_name: "Milesight UC100 CIVITECH HOMELAB"
+    bi_qa_device_name: "Milesight UC100 BCN QA"
+    notes: |
+      Dual-registered with same OTAA credentials in both NSs (home ChirpStack + BI QA).
+      When UC100 is powered in BCN QA radio range -> joins via BCN GW -> BI QA NS.
+      When powered at home -> joins via home kona-micro-00A511 -> Civitech ChirpStack.
+      Transparent roaming since LoRaWAN OTAA is deterministic by DevEUI/AppKey.
+      Pending: ToolBox install + flash AppKey to device (Milesight support email 2026-04-19).
