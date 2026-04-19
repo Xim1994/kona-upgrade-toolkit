@@ -1,0 +1,85 @@
+# Device inventory tracked in Excel (onboard devices.xlsx), mirrored here.
+# Source: Xim's Excel, last update 2026-04-19.
+# Fields:
+#   entorno   : QA | Prod | None
+#   normalizer: Si/No (NS payload normalizer uploaded)
+#   decoder   : Si/No (NS JS decoder uploaded)
+#   device_type: Si/No (device model registered in NS)
+#   device_created: PCM & SVAN | SVAN | None (where device is created / monitored)
+#   connectivity: Online | Offline
+#   status    : Activo | No Telemetry
+#   dev_eui   : hex 16 chars or null
+---
+devices:
+  - dispositivo: "Tektelic Tundra T0006779"
+    entorno: QA
+    normalizer: Si
+    decoder: Si
+    device_type: Si
+    device_created: "PCM & SVAN"
+    connectivity: Online
+    status: "No Telemetry"
+    dev_eui: null  # not in Excel
+
+  - dispositivo: "Tektelic Tundra T0006779 B2"
+    entorno: null
+    normalizer: Si
+    decoder: Si
+    device_type: Si
+    device_created: null
+    connectivity: Offline
+    status: "No Telemetry"
+    dev_eui: "647FDA000001B2AC"
+
+  - dispositivo: "Tektelic Tundra Display"
+    entorno: null
+    normalizer: No
+    decoder: No
+    device_type: No
+    device_created: null
+    connectivity: Offline
+    status: "No Telemetry"
+    dev_eui: null
+
+  - dispositivo: "Tektelic Elsys.se ERS2 Sound"
+    entorno: Prod
+    normalizer: Si
+    decoder: Si
+    device_type: Si
+    device_created: "PCM & SVAN"
+    connectivity: Online
+    status: Activo
+    dev_eui: "A81758FFFE0A13E8"
+
+  - dispositivo: "Tektelic Elsys.se ERSCO2"
+    entorno: QA
+    normalizer: Si
+    decoder: Si
+    device_type: Si
+    device_created: "PCM & SVAN"
+    connectivity: Online
+    status: "No Telemetry"
+    dev_eui: "A81758FFFE045EEC"
+
+  - dispositivo: "Milesight VS121-868M"
+    entorno: Prod
+    normalizer: Si
+    decoder: Si
+    device_type: Si
+    device_created: "PCM & SVAN"
+    connectivity: Online
+    status: Activo
+    dev_eui: "24E124600C234196"
+
+  - dispositivo: "Milesight WS303-868M"
+    entorno: null
+    normalizer: No
+    decoder: No
+    device_type: No
+    device_created: null
+    connectivity: Offline
+    status: "No Telemetry"
+    dev_eui: "24E124993D529043"
+
+# Planned additions (not yet in Excel):
+#   - Milesight UC100 868M — Modbus->LoRa bridge, target BCN QA
