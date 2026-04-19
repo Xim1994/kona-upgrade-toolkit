@@ -1,5 +1,6 @@
 #!/bin/bash
-# ChirpStack v4 bootstrap for Proxmox LXC (Debian 12).
+# ChirpStack v4 bootstrap. Usage (if no curl yet):
+#   apt-get update && apt-get install -y curl && curl -fsSL https://raw.githubusercontent.com/Xim1994/kona-upgrade-toolkit/main/chirpstack/bootstrap.sh | bash
 set -euo pipefail
 echo "=== ChirpStack v4 bootstrap ==="
 apt-get update -qq
